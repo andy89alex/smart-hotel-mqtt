@@ -58,4 +58,32 @@ public class RoomClient {
     }
 
     protected MqttClient raw() { return client; }
+
+    private volatile boolean light = false;
+    private volatile boolean ac = false;
+    private volatile boolean dnd = false;
+    private final java.util.Random rnd = new java.util.Random();
+    private double temperature = 22.0;
+
+    public boolean light() { return light; }
+    public boolean ac() { return ac; }
+    public boolean dnd() { return dnd; }
+
+    public void publishAllState() throws MqttException {
+        publishRetained(Topics.stateLight(roomId), new com.example.smarthotel.common.payload.StatePayload(light, java.time.Instant.now()));
+        publishRetained(Topics.stateAc(roomId),    new com.example.smarthotel.common.payload.StatePayload(ac, java.time.Instant.now()));
+        publishRetained(Topics.stateDnd(roomId),   new com.example.smarthotel.common.payload.StatePayload(dnd, java.time.Instant.now()));
+    }
+
+    public void publishTemperature() throws MqttException {
+        temperature += (rnd.nextDouble() - 0.5); // drift ±0.5
+        if (temperature < 18) temperature = 18;
+        if (temperature > 26) temperature = 26;
+        double rounded = Math.round(temperature * 10.0) / 10.0;
+        MqttMessage msg = new MqttMessage(Json.toBytes(
+            new com.example.smarthotel.common.payload.TemperaturePayload(rounded, "C", java.time.Instant.now())));
+        msg.setQos(1);
+        msg.setRetained(false);
+        raw().publish(Topics.telemetryTemperature(roomId), msg);
+    }
 }
