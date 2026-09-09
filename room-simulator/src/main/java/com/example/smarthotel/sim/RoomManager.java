@@ -1,6 +1,8 @@
 package com.example.smarthotel.sim;
 
 import com.example.smarthotel.common.RoomId;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -9,6 +11,8 @@ import java.util.List;
 
 @Component
 public class RoomManager {
+    private static final Logger log = LoggerFactory.getLogger(RoomManager.class);
+
     private final SimulatorProperties props;
     private final List<RoomClient> rooms = new ArrayList<>();
 
@@ -21,14 +25,22 @@ public class RoomManager {
                 client.connect();
                 client.publishAllState();
                 rooms.add(client);
-            } catch (Exception e) { throw new RuntimeException("failed to start " + spec, e); }
+            } catch (Exception e) {
+                // Don't leak connections already opened for earlier rooms in this startAll() call.
+                stopAll();
+                throw new RuntimeException("failed to start " + spec, e);
+            }
         }
     }
 
     @Scheduled(fixedDelayString = "${simulator.telemetryIntervalMs:5000}")
     public void tick() {
         for (RoomClient r : rooms) {
-            try { r.publishTemperature(); } catch (Exception ignored) {}
+            try {
+                r.publishTemperature();
+            } catch (Exception e) {
+                log.warn("failed to publish temperature for room {}", r.roomId(), e);
+            }
         }
     }
 
