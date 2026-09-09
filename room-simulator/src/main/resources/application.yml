@@ -1,0 +1,11 @@
+spring:
+  main:
+    web-application-type: none
+simulator:
+  brokerUrl: ${BROKER_URL:tcp://localhost:1883}
+  telemetryIntervalMs: 5000
+  rooms:
+    - { floor: floor1, room: room101 }
+    - { floor: floor1, room: room102 }
+    - { floor: floor2, room: room201 }
+    - { floor: floor2, room: room202 }
