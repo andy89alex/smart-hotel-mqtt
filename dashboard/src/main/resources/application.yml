@@ -1,0 +1,4 @@
+server:
+  port: 8080
+dashboard:
+  brokerUrl: ${BROKER_URL:tcp://localhost:1883}
