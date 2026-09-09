@@ -6,15 +6,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 @Component
 public class RoomManager {
     private static final Logger log = LoggerFactory.getLogger(RoomManager.class);
 
     private final SimulatorProperties props;
-    private final List<RoomClient> rooms = new ArrayList<>();
+    private final List<RoomClient> rooms = new CopyOnWriteArrayList<>();
 
     public RoomManager(SimulatorProperties props) { this.props = props; }
 
