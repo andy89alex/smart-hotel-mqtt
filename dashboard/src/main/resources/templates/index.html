@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Front Desk — Room Status</title>
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; background:#f4f5f7; }
+    h1 { font-size: 20px; }
+    #rooms { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
+    .card { background:#fff; border-radius:10px; padding:14px; box-shadow:0 1px 3px rgba(0,0,0,.1); }
+    .room { font-weight:600; }
+    .off { color:#b00; } .on { color:#0a0; }
+    .badge { font-size:12px; padding:2px 8px; border-radius:12px; background:#eee; }
+    .offline { background:#fdd; } .online { background:#dfd; }
+    button { margin:2px; padding:4px 8px; cursor:pointer; }
+    .temp { font-size:24px; }
+  </style>
+</head>
+<body>
+  <h1>Front Desk — Live Room Status</h1>
+  <div id="rooms"></div>
+  <script>
+    const cards = {};
+    function keyOf(r){ return r.floor + "/" + r.room; }
+    function render(r){
+      const k = keyOf(r);
+      let el = cards[k];
+      if(!el){ el = document.createElement('div'); el.className='card'; cards[k]=el;
+        document.getElementById('rooms').appendChild(el); }
+      const t = (r.temperature==null) ? '—' : r.temperature.toFixed(1)+'°C';
+      el.innerHTML =
+        '<div class="room">'+r.floor+' / '+r.room+'</div>'+
+        '<div><span class="badge '+(r.availability)+'">'+r.availability+'</span></div>'+
+        '<div class="temp">'+t+'</div>'+
+        '<div>Light: <span class="'+(r.light?'on':'off')+'">'+(r.light?'ON':'OFF')+'</span> '+
+          '<button onclick="cmd(\''+r.floor+'\',\''+r.room+'\',\'light\','+(!r.light)+')">toggle</button></div>'+
+        '<div>AC: <span class="'+(r.ac?'on':'off')+'">'+(r.ac?'ON':'OFF')+'</span> '+
+          '<button onclick="cmd(\''+r.floor+'\',\''+r.room+'\',\'ac\','+(!r.ac)+')">toggle</button></div>'+
+        '<div>DND: <span class="'+(r.dnd?'on':'off')+'">'+(r.dnd?'ON':'OFF')+'</span> '+
+          '<button onclick="cmd(\''+r.floor+'\',\''+r.room+'\',\'dnd\','+(!r.dnd)+')">toggle</button></div>';
+    }
+    function cmd(floor, room, device, on){
+      fetch('/api/rooms/'+floor+'/'+room+'/cmd/'+device, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({on: on})
+      });
+    }
+    fetch('/api/rooms').then(r=>r.json()).then(list=>list.forEach(render));
+    const sock = new SockJS('/ws');
+    const stomp = Stomp.over(sock);
+    stomp.debug = null;
+    stomp.connect({}, () => stomp.subscribe('/topic/rooms', m => render(JSON.parse(m.body))));
+  </script>
+</body>
+</html>
