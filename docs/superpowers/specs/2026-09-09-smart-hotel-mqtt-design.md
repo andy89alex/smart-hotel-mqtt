@@ -18,11 +18,11 @@ Proyek ini dirancang untuk **menunjukkan penguasaan konsep MQTT yang lazim ditan
 
 ## 2. Sasaran & Kriteria Sukses
 
-- `docker compose up` → seluruh sistem hidup tanpa langkah manual tambahan.
+- `mvn test` hijau tanpa Docker (broker embedded) → seluruh perilaku MQTT terverifikasi otomatis. Untuk demo live, `docker compose up` (atau Mosquitto lokal + `mvn spring-boot:run`) menghidupkan seluruh sistem.
 - Dashboard yang baru connect **langsung** menampilkan status terakhir semua kamar (via retained message), tanpa menunggu telemetri berikutnya.
 - Mematikan satu proses/koneksi kamar → dashboard menandai kamar itu `offline` dalam hitungan detik (via LWT).
 - Operator menekan toggle di dashboard → kamar terkait merespons dan status ter-update di semua klien.
-- Ada integration test yang menjalankan broker MQTT asli (via Testcontainers) dan memverifikasi pub/sub, retained, serta LWT.
+- Ada integration test yang menjalankan broker MQTT asli (Moquette embedded, in-process, tanpa Docker) dan memverifikasi pub/sub, retained, serta LWT.
 - README menjelaskan pemetaan tiap konsep MQTT ke bagian kode (bahan cerita interview).
 
 ---
@@ -104,21 +104,21 @@ JSON ringkas, mis.:
 
 ## 6. Teknologi
 
-- **Java 21**, **Spring Boot 3.x**
+- **Java 21** (di-compile dengan `release` 21; mesin dev menjalankan JDK 25), **Spring Boot 3.5.6** (dipilih untuk kompatibilitas JDK baru)
 - **Spring Integration MQTT** (`spring-integration-mqtt`, di atas Eclipse Paho) untuk inbound/outbound
 - **Spring WebSocket + STOMP** untuk push real-time ke browser
 - **Frontend**: satu halaman sederhana (HTML + JS via STOMP/SockJS). Fokus fungsi & real-time, bukan UI cantik. Boleh Thymeleaf untuk serve halaman.
-- **Broker**: Eclipse Mosquitto (image Docker resmi)
-- **Testing**: JUnit 5, **Testcontainers** (container broker MQTT asli)
-- **Build**: Maven multi-module; **Docker Compose** untuk orkestrasi
+- **Broker (live demo)**: Eclipse Mosquitto — via Docker Compose (opsional) atau Mosquitto lokal (`brew install mosquitto`)
+- **Testing**: JUnit 5 + **broker Moquette embedded** (in-process, `io.moquette:moquette-broker`) — integration test **tidak butuh Docker**
+- **Build**: Maven multi-module; Docker Compose disediakan sebagai jalur demo opsional (bukan syarat test)
 
 ---
 
 ## 7. Strategi Testing
 
 - **Unit test**: mapping payload JSON ↔ domain object; logika transisi state kamar (mis. perintah `light on` → state berubah & ter-publish).
-- **Integration test (Testcontainers)**:
-  - Jalankan container Mosquitto asli.
+- **Integration test (broker Moquette embedded, in-process, tanpa Docker)**:
+  - Jalankan broker MQTT asli di dalam proses test pada port acak.
   - Verifikasi: publish retained → subscriber yang baru connect menerima nilai terakhir.
   - Verifikasi: perintah `cmd/*` → simulator mengubah & mem-publish state.
   - Verifikasi: koneksi kamar diputus → pesan LWT `offline` diterima subscriber.

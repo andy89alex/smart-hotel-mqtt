@@ -6,14 +6,15 @@
 
 **Architecture:** A Mosquitto broker (Docker) sits between a `room-simulator` app that publishes room telemetry/state and a `dashboard` app that subscribes, keeps in-memory state, and pushes live updates to a browser via WebSocket/STOMP. A shared `common` module holds payload records and topic helpers. The simulator uses raw Eclipse Paho (one connection per room, so each room gets its own Last-Will), and the dashboard uses Spring Integration MQTT (single subscription of `hotel/#`).
 
-**Tech Stack:** Java 21, Spring Boot 3.x, Spring Integration MQTT, Eclipse Paho, Spring WebSocket + STOMP, Jackson, Maven (multi-module), Eclipse Mosquitto, JUnit 5, Testcontainers, Docker Compose.
+**Tech Stack:** Java 21 (compiled with release=21; the dev machine runs JDK 25), Spring Boot 3.5.x, Spring Integration MQTT, Eclipse Paho, Spring WebSocket + STOMP, Jackson, Maven (multi-module), JUnit 5, **Moquette embedded broker for tests (no Docker required)**. Eclipse Mosquitto + Docker Compose are provided only as an optional live-demo path.
 
 **Spec:** `docs/superpowers/specs/2026-09-09-smart-hotel-mqtt-design.md`
 
 ## Global Constraints
 
-- Java 21, Spring Boot 3.x, Maven multi-module (parent `pom.xml` + modules `common`, `room-simulator`, `dashboard`).
-- Broker: Eclipse Mosquitto official Docker image; anonymous access in the base version.
+- Java 21 (Maven compiler `release` 21; dev machine has JDK 25), Spring Boot **3.5.6**, Maven multi-module (parent `pom.xml` + modules `common`, `room-simulator`, `dashboard`).
+- **Tests must NOT require Docker.** Integration tests spin up an in-process **Moquette** broker (`io.moquette:moquette-broker`) on a random free port; a reusable `EmbeddedBroker` test helper exposes `brokerUrl()`. Testcontainers is not used.
+- Broker for live demo: Eclipse Mosquitto via Docker Compose (optional), OR a locally-installed Mosquitto (`brew install mosquitto`). Anonymous access in the base version.
 - Topic scheme (verbatim from spec §4), base `hotel/{floor}/{room}/...`:
   - `telemetry/temperature` — retained=false, QoS1 (simulator publishes)
   - `state/light`, `state/ac`, `state/dnd` — retained=true, QoS1 (simulator publishes)
@@ -63,7 +64,7 @@ target/
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.4</version>
+        <version>3.5.6</version>
         <relativePath/>
     </parent>
     <groupId>com.example.smarthotel</groupId>
@@ -148,15 +149,9 @@ target/
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers</artifactId>
-            <version>1.20.1</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>1.20.1</version>
+            <groupId>io.moquette</groupId>
+            <artifactId>moquette-broker</artifactId>
+            <version>0.17</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -209,15 +204,9 @@ target/
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers</artifactId>
-            <version>1.20.1</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>1.20.1</version>
+            <groupId>io.moquette</groupId>
+            <artifactId>moquette-broker</artifactId>
+            <version>0.17</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -485,7 +474,7 @@ git commit -m "feat(common): topic helpers, payload records, and JSON mapping"
 
 **Files:**
 - Create: `room-simulator/src/main/java/com/example/smarthotel/sim/RoomClient.java`
-- Test: `room-simulator/src/test/java/com/example/smarthotel/sim/MosquittoContainer.java`
+- Test: `room-simulator/src/test/java/com/example/smarthotel/sim/EmbeddedBroker.java`
 - Test: `room-simulator/src/test/java/com/example/smarthotel/sim/RoomClientAvailabilityTest.java`
 
 **Interfaces:**
@@ -497,29 +486,45 @@ git commit -m "feat(common): topic helpers, payload records, and JSON mapping"
   - `void kill()` — `client.disconnectForcibly(0, 0)` to simulate a crash so the broker fires the LWT.
   - `RoomId roomId()`.
 
-- [ ] **Step 1: Add reusable Testcontainers helper**
+- [ ] **Step 1: Add reusable in-process broker helper (no Docker)**
 
-`MosquittoContainer.java`:
+`EmbeddedBroker.java` (Moquette 0.17; the property keys below are stable strings, so no dependency on `IConfig` constant names):
 ```java
 package com.example.smarthotel.sim;
 
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.images.builder.Transferable;
-import org.testcontainers.utility.DockerImageName;
+import io.moquette.broker.Server;
+import io.moquette.broker.config.MemoryConfig;
 
-public class MosquittoContainer extends GenericContainer<MosquittoContainer> {
-    public MosquittoContainer() {
-        super(DockerImageName.parse("eclipse-mosquitto:2"));
-        withExposedPorts(1883);
-        withCopyToContainer(
-            Transferable.of("listener 1883\nallow_anonymous true\npersistence false\n"),
-            "/mosquitto/config/mosquitto.conf");
-        waitingFor(Wait.forListeningPort());
+import java.net.ServerSocket;
+import java.util.Properties;
+
+/** In-process MQTT broker for tests — starts on a random free port, no Docker. */
+public class EmbeddedBroker implements AutoCloseable {
+    private final Server server = new Server();
+    private final int port;
+
+    public EmbeddedBroker() {
+        this.port = freePort();
+        Properties props = new Properties();
+        props.setProperty("host", "127.0.0.1");
+        props.setProperty("port", Integer.toString(port));
+        props.setProperty("allow_anonymous", "true");
+        props.setProperty("persistence_enabled", "false");
+        try {
+            server.startServer(new MemoryConfig(props));
+        } catch (Exception e) {
+            throw new RuntimeException("failed to start embedded broker", e);
+        }
     }
-    public String brokerUrl() {
-        return "tcp://" + getHost() + ":" + getMappedPort(1883);
+
+    public String brokerUrl() { return "tcp://127.0.0.1:" + port; }
+
+    private static int freePort() {
+        try (ServerSocket s = new ServerSocket(0)) { return s.getLocalPort(); }
+        catch (Exception e) { throw new RuntimeException(e); }
     }
+
+    @Override public void close() { server.stopServer(); }
 }
 ```
 
@@ -534,14 +539,13 @@ import com.example.smarthotel.common.Json;
 import com.example.smarthotel.common.payload.AvailabilityPayload;
 import org.eclipse.paho.client.mqttv3.*;
 import org.junit.jupiter.api.*;
-import org.testcontainers.junit.jupiter.*;
 
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@Testcontainers
 class RoomClientAvailabilityTest {
-    @Container static MosquittoContainer broker = new MosquittoContainer();
+    static final EmbeddedBroker broker = new EmbeddedBroker();
+    @AfterAll static void stopBroker() { broker.close(); }
     private final RoomId room = new RoomId("floor1", "room101");
 
     private MqttClient subscribe(String topic, BlockingQueue<String> sink) throws Exception {
@@ -581,7 +585,7 @@ class RoomClientAvailabilityTest {
 - [ ] **Step 3: Run test to verify it fails**
 
 Run: `mvn -q -pl room-simulator test -Dtest=RoomClientAvailabilityTest`
-Expected: FAIL (compilation error: `RoomClient` not found). Requires Docker running.
+Expected: FAIL (compilation error: `RoomClient` not found). No Docker needed — the test starts an in-process Moquette broker.
 
 - [ ] **Step 4: Implement `RoomClient`**
 
@@ -674,14 +678,13 @@ import com.example.smarthotel.common.*;
 import com.example.smarthotel.common.payload.*;
 import org.eclipse.paho.client.mqttv3.*;
 import org.junit.jupiter.api.*;
-import org.testcontainers.junit.jupiter.*;
 
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@Testcontainers
 class RoomClientStateTest {
-    @Container static MosquittoContainer broker = new MosquittoContainer();
+    static final EmbeddedBroker broker = new EmbeddedBroker();
+    @AfterAll static void stopBroker() { broker.close(); }
     private final RoomId room = new RoomId("floor1", "room102");
 
     @Test
@@ -781,15 +784,14 @@ import com.example.smarthotel.common.*;
 import com.example.smarthotel.common.payload.*;
 import org.eclipse.paho.client.mqttv3.*;
 import org.junit.jupiter.api.*;
-import org.testcontainers.junit.jupiter.*;
 
 import java.time.Instant;
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@Testcontainers
 class RoomClientCommandTest {
-    @Container static MosquittoContainer broker = new MosquittoContainer();
+    static final EmbeddedBroker broker = new EmbeddedBroker();
+    @AfterAll static void stopBroker() { broker.close(); }
     private final RoomId room = new RoomId("floor1", "room103");
 
     @Test
@@ -898,13 +900,12 @@ git commit -m "feat(simulator): handle cmd/* commands and re-publish room state"
 package com.example.smarthotel.sim;
 
 import org.junit.jupiter.api.*;
-import org.testcontainers.junit.jupiter.*;
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
-@Testcontainers
 class RoomManagerTest {
-    @Container static MosquittoContainer broker = new MosquittoContainer();
+    static final EmbeddedBroker broker = new EmbeddedBroker();
+    @AfterAll static void stopBroker() { broker.close(); }
 
     @Test
     void startsAllConfiguredRooms() throws Exception {
@@ -1035,16 +1036,15 @@ simulator:
 Run: `mvn -q -pl room-simulator test -Dtest=RoomManagerTest`
 Expected: PASS.
 
-- [ ] **Step 8: Manual smoke test against local broker**
+- [ ] **Step 8: Manual smoke test (OPTIONAL — needs a running broker)**
 
-Run:
+This step is not a gate — the Testcontainers-free integration tests already verify pub/sub end-to-end. Run it only if a broker is available (either `docker compose up -d broker`, or `brew install mosquitto && brew services start mosquitto`). With a broker on `localhost:1883`:
 ```bash
-docker compose up -d broker
 mvn -q -pl room-simulator -am spring-boot:run &
 sleep 8
-docker run --rm --network host eclipse-mosquitto:2 mosquitto_sub -h localhost -t 'hotel/#' -v -W 3
+mosquitto_sub -h localhost -t 'hotel/#' -v -W 3   # if mosquitto CLI is installed
 ```
-Expected: printed retained `availability`/`state/*` lines plus periodic `telemetry/temperature` for the four rooms. Then stop the app (`kill %1`) and `docker compose down`.
+Expected: retained `availability`/`state/*` lines plus periodic `telemetry/temperature` for the four rooms. Then `kill %1`. If no broker is available, skip — Task 3–6 tests cover this behavior.
 
 - [ ] **Step 9: Commit**
 
@@ -1303,15 +1303,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.junit.jupiter.*;
 
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 class CommandPublishIntegrationTest {
-    @Container static MosquittoContainer broker = new MosquittoContainer();
+    // static final so the broker is up before @DynamicPropertySource is read
+    static final EmbeddedBroker broker = new EmbeddedBroker();
+    @AfterAll static void stopBroker() { broker.close(); }
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
@@ -1335,7 +1335,7 @@ class CommandPublishIntegrationTest {
 }
 ```
 
-Reuse the `MosquittoContainer` helper — copy it to `dashboard/src/test/java/com/example/smarthotel/dashboard/MosquittoContainer.java` (same body as Task 3 Step 1, package `com.example.smarthotel.dashboard`).
+Reuse the `EmbeddedBroker` helper — copy it to `dashboard/src/test/java/com/example/smarthotel/dashboard/EmbeddedBroker.java` (same body as Task 3 Step 1, but with package `com.example.smarthotel.dashboard`).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1607,16 +1607,15 @@ Add inside `<dependencies>`:
 Run: `mvn -q -pl dashboard -am -DskipTests package`
 Expected: BUILD SUCCESS.
 
-- [ ] **Step 4: Manual end-to-end check (broker + simulator + dashboard)**
+- [ ] **Step 4: Manual end-to-end check (OPTIONAL — needs a running broker)**
 
-Run:
+Not a gate (UI has no automated test). Requires a broker on `localhost:1883` (`docker compose up -d broker`, or `brew services start mosquitto`):
 ```bash
-docker compose up -d broker
 mvn -q -pl room-simulator -am spring-boot:run &
 mvn -q -pl dashboard -am spring-boot:run &
 sleep 12
 ```
-Open `http://localhost:8080` — expect room cards with live temperature, online badges. Click a Light toggle → the card flips ON within ~1s (command → simulator → state republish → STOMP). Stop a room by killing the simulator (`kill %1`) → within seconds its badge shows `offline` (LWT). Then `kill %2` and `docker compose down`.
+Open `http://localhost:8080` — expect room cards with live temperature, online badges. Click a Light toggle → the card flips ON within ~1s (command → simulator → state republish → STOMP). Kill the simulator (`kill %1`) → within seconds its badge shows `offline` (LWT). Then `kill %2`. If no broker is available, verify the build instead (Step 3) and rely on the automated tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1694,7 +1693,13 @@ Hardware-free demo of a hotel room-control system over MQTT. Simulated rooms
 publish telemetry/state to a Mosquitto broker; a Spring Boot dashboard shows
 all rooms live in the browser and sends commands back.
 
-## Run it
+## Run the tests (no broker needed)
+
+```bash
+mvn test   # unit + integration; integration tests spin up an in-process Moquette broker
+```
+
+## Run it live — Option A: Docker
 
 ```bash
 mvn -q -DskipTests package
@@ -1702,8 +1707,18 @@ docker compose up --build
 # open http://localhost:8080
 ```
 
+## Run it live — Option B: no Docker (local Mosquitto)
+
+```bash
+brew install mosquitto && brew services start mosquitto   # broker on localhost:1883
+mvn -q -DskipTests package
+mvn -pl room-simulator spring-boot:run &
+mvn -pl dashboard spring-boot:run &
+# open http://localhost:8080
+```
+
 - Toggle a room's Light/AC/DND from the dashboard → the simulated room reacts.
-- Stop the `room-simulator` container → rooms show `offline` (MQTT Last Will).
+- Stop the `room-simulator` process/container → rooms show `offline` (MQTT Last Will).
 
 ## Architecture
 
@@ -1726,25 +1741,19 @@ docker compose up --build
 ## Tests
 
 ```bash
-mvn test   # unit + Testcontainers integration (needs Docker)
+mvn test   # unit + integration; no Docker — integration tests use an in-process Moquette broker
 ```
 ````
 
-- [ ] **Step 5: Verify the whole stack from clean**
+- [ ] **Step 5: Verify the packaged jars build (gate)**
 
-Run:
-```bash
-mvn -q -DskipTests package
-docker compose up --build -d
-sleep 15
-curl -s http://localhost:8080/api/rooms
-```
-Expected: JSON array of rooms with temperatures/availability. Then `docker compose down`.
+Run: `mvn -q -DskipTests package`
+Expected: BUILD SUCCESS — both `room-simulator/target/room-simulator-0.1.0.jar` and `dashboard/target/dashboard-0.1.0.jar` exist. (The docker-compose live run is optional and only works where Docker is installed; it is not a gate.)
 
-- [ ] **Step 6: Run the complete test suite**
+- [ ] **Step 6: Run the complete test suite (gate)**
 
 Run: `mvn test`
-Expected: BUILD SUCCESS, all modules' tests green (Docker required).
+Expected: BUILD SUCCESS, all modules' tests green. No Docker required — integration tests use the in-process Moquette broker.
 
 - [ ] **Step 7: Commit**
 
@@ -1757,6 +1766,7 @@ git commit -m "chore: full docker-compose orchestration and project README"
 
 ## Self-Review Notes
 
-- **Spec coverage:** broker/Docker (Task 1, 10) · topic scheme §4 (Task 2) · simulator with per-room LWT + retained + QoS + commands §3 (Tasks 3–6) · dashboard subscribe `hotel/#` + in-memory state + STOMP + commands §3 (Tasks 7–9) · MQTT-concept mapping §5 (README, Task 10) · Testcontainers integration tests §7 (Tasks 3–8) · web UI §3/§6 (Task 9) · `docker compose up` success criterion §2 (Task 10). Out-of-scope items (DB, auth, fancy UI) intentionally absent. TLS/auth stretch goal not planned (optional per spec §8).
+- **Spec coverage:** broker config + optional Docker demo (Task 1, 10) · topic scheme §4 (Task 2) · simulator with per-room LWT + retained + QoS + commands §3 (Tasks 3–6) · dashboard subscribe `hotel/#` + in-memory state + STOMP + commands §3 (Tasks 7–9) · MQTT-concept mapping §5 (README, Task 10) · integration tests via in-process Moquette broker §7 (Tasks 3–8) · web UI §3/§6 (Task 9). Out-of-scope items (DB, auth, fancy UI) intentionally absent. TLS/auth stretch goal not planned (optional per spec §8).
+- **Environment ruling:** the dev machine has no Docker and runs JDK 25. Per user decision, integration tests use an embedded Moquette broker (Docker-free) instead of Testcontainers, and Spring Boot is pinned to 3.5.6 for JDK-25 compatibility while compiling to Java 21. Docker Compose remains an optional live-demo path; it is not a verification gate. This diverges from spec §7 (which named Testcontainers) and §2 (which named `docker compose up`); the spec is updated to match.
 - **Type consistency:** `RoomId(floor, room)`, `Topics.*` signatures, payload records, `Json.toBytes/read`, `RoomView` fields, `RoomStore.apply`, `CommandPublisher.send`, and the `mqtt_topic` header used by the outbound handler are consistent across tasks.
 - **Placeholders:** none — every code step contains full code.
