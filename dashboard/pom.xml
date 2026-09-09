@@ -49,11 +49,6 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <!-- No @SpringBootApplication class exists yet (added in a later task);
-                         repackage would otherwise fail the build with "Unable to find main class". -->
-                    <skip>true</skip>
-                </configuration>
             </plugin>
         </plugins>
     </build>

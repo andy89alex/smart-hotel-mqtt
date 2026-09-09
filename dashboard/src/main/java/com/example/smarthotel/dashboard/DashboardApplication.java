@@ -10,6 +10,7 @@ import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.mqtt.core.DefaultMqttPahoClientFactory;
 import org.springframework.integration.mqtt.core.MqttPahoClientFactory;
 import org.springframework.integration.mqtt.inbound.MqttPahoMessageDrivenChannelAdapter;
+import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
 import org.springframework.messaging.MessageChannel;
 
 @SpringBootApplication
@@ -36,6 +37,27 @@ public class DashboardApplication {
             new MqttPahoMessageDrivenChannelAdapter("dashboard-in", factory, Topics.ALL_WILDCARD);
         adapter.setQos(1);
         adapter.setOutputChannel(mqttInboundChannel());
+        // MqttIngest.handle declares Message<byte[]>; the default converter delivers
+        // String payloads, so force byte[] to match (and to survive the dashboard's
+        // own outbound cmd/* publishes looping back through the hotel/# wildcard).
+        DefaultPahoMessageConverter converter = new DefaultPahoMessageConverter();
+        converter.setPayloadAsBytes(true);
+        adapter.setConverter(converter);
         return adapter;
+    }
+
+    @Bean
+    public MessageChannel mqttOutboundChannel() {
+        return new org.springframework.integration.channel.DirectChannel();
+    }
+
+    @Bean
+    @org.springframework.integration.annotation.ServiceActivator(inputChannel = "mqttOutboundChannel")
+    public org.springframework.messaging.MessageHandler mqttOutbound(MqttPahoClientFactory factory) {
+        var handler = new org.springframework.integration.mqtt.outbound.MqttPahoMessageHandler("dashboard-out", factory);
+        handler.setAsync(true);
+        handler.setDefaultQos(1);
+        handler.setTopicExpressionString("headers['mqtt_topic']");
+        return handler;
     }
 }

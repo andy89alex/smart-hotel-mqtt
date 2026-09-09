@@ -1,13 +1,13 @@
 package com.example.smarthotel.dashboard.model;
 
 public class RoomView {
-    public String floor;
-    public String room;
-    public Double temperature;
-    public boolean light;
-    public boolean ac;
-    public boolean dnd;
-    public String availability = "unknown";
+    public volatile String floor;
+    public volatile String room;
+    public volatile Double temperature;
+    public volatile boolean light;
+    public volatile boolean ac;
+    public volatile boolean dnd;
+    public volatile String availability = "unknown";
 
     public String key() { return floor + "/" + room; }
 }
