@@ -36,6 +36,28 @@ public class RoomClient {
         client.connect(opts);
         publishRetained(Topics.availability(roomId),
                 new AvailabilityPayload(AvailabilityPayload.ONLINE, Instant.now()));
+        subscribeToCommands();
+    }
+
+    public void subscribeToCommands() throws MqttException {
+        client.subscribe(Topics.cmdLight(roomId), 1, (t, m) -> applyCommand("light", m));
+        client.subscribe(Topics.cmdAc(roomId),    1, (t, m) -> applyCommand("ac", m));
+        client.subscribe(Topics.cmdDnd(roomId),   1, (t, m) -> applyCommand("dnd", m));
+    }
+
+    private void applyCommand(String which, MqttMessage m) {
+        boolean on = Json.read(m.getPayload(), com.example.smarthotel.common.payload.CommandPayload.class).on();
+        try {
+            switch (which) {
+                case "light" -> { light = on; publishRetained(Topics.stateLight(roomId), state(on)); }
+                case "ac"    -> { ac = on;    publishRetained(Topics.stateAc(roomId), state(on)); }
+                case "dnd"   -> { dnd = on;   publishRetained(Topics.stateDnd(roomId), state(on)); }
+            }
+        } catch (MqttException e) { throw new RuntimeException(e); }
+    }
+
+    private com.example.smarthotel.common.payload.StatePayload state(boolean on) {
+        return new com.example.smarthotel.common.payload.StatePayload(on, java.time.Instant.now());
     }
 
     protected void publishRetained(String topic, Object payload) throws MqttException {
