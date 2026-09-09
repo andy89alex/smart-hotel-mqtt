@@ -101,14 +101,19 @@ Then: toggle a room's Light/AC/DND from the dashboard and watch the room react; 
 ## Project status
 
 Built with a spec-first, test-driven workflow (design → plan → task-by-task implementation
-with review). Current progress:
+with review). The project is **complete**:
 
 - ✅ Multi-module scaffold + broker config
 - ✅ `common`: topic helpers, payload records, JSON
-- ✅ `room-simulator`: per-room MQTT connection with retained availability + Last-Will
-- 🔜 Room state + telemetry publishing, command handling, N-room app wiring
-- 🔜 `dashboard`: MQTT ingest, in-memory store, WebSocket push, command endpoint, web UI
-- 🔜 Docker Compose orchestration
+- ✅ `room-simulator`: per-room MQTT connection with retained availability + Last-Will,
+  telemetry/state publishing, command handling, N-room app wiring — packaged as an
+  executable jar
+- ✅ `dashboard`: MQTT ingest, in-memory store, WebSocket/STOMP push, command endpoint,
+  web UI — packaged as an executable jar
+- ✅ Docker Compose orchestration (`broker` + `room-simulator` + `dashboard`)
+
+Full test suite (unit + integration, in-process Moquette broker, no Docker) is green
+across all modules.
 
 Design and implementation plan live under [`docs/superpowers/`](docs/superpowers/).
 
