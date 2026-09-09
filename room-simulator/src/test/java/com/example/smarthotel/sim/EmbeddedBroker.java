@@ -18,6 +18,10 @@ public class EmbeddedBroker implements AutoCloseable {
         props.setProperty("port", Integer.toString(port));
         props.setProperty("allow_anonymous", "true");
         props.setProperty("persistence_enabled", "false");
+        // Moquette writes a telemetry UUID marker file under data_path; point it at the
+        // JVM temp dir (always present) so it doesn't fail trying to write to a
+        // nonexistent "data/" dir relative to the working directory during tests.
+        props.setProperty("data_path", System.getProperty("java.io.tmpdir"));
         try {
             server.startServer(new MemoryConfig(props));
         } catch (Exception e) {
