@@ -6,10 +6,13 @@ import com.example.smarthotel.common.Topics;
 import com.example.smarthotel.common.payload.AvailabilityPayload;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 
 public class RoomClient {
+    private static final Logger log = LoggerFactory.getLogger(RoomClient.class);
     private final RoomId roomId;
     private final MqttClient client;
 
@@ -48,12 +51,32 @@ public class RoomClient {
     private void applyCommand(String which, MqttMessage m) {
         boolean on = Json.read(m.getPayload(), com.example.smarthotel.common.payload.CommandPayload.class).on();
         try {
-            switch (which) {
-                case "light" -> { light = on; publishRetained(Topics.stateLight(roomId), state(on)); }
-                case "ac"    -> { ac = on;    publishRetained(Topics.stateAc(roomId), state(on)); }
-                case "dnd"   -> { dnd = on;   publishRetained(Topics.stateDnd(roomId), state(on)); }
-            }
+            setDeviceState(which, on);
         } catch (MqttException e) { throw new RuntimeException(e); }
+    }
+
+    /**
+     * Change a device's state and report it via state/*. Shared by the command path
+     * (front desk → cmd/*) and the guest path (guest operates a switch in the room).
+     */
+    private void setDeviceState(String device, boolean on) throws MqttException {
+        switch (device) {
+            case "light" -> { light = on; publishRetained(Topics.stateLight(roomId), state(on)); }
+            case "ac"    -> { ac = on;    publishRetained(Topics.stateAc(roomId), state(on)); }
+            case "dnd"   -> { dnd = on;   publishRetained(Topics.stateDnd(roomId), state(on)); }
+            default -> throw new IllegalArgumentException("unknown device: " + device);
+        }
+    }
+
+    /**
+     * Simulates a guest physically operating a switch in the room: the room itself decides
+     * the change, updates its own state, and reports it via state/* — exactly as a real
+     * device would. Unlike a dashboard command, no cmd/* message is involved; the room is
+     * the originator. Valid devices: "light", "ac", "dnd".
+     */
+    public void guestSet(String device, boolean on) throws MqttException {
+        log.info("Guest in {}/{} set {} -> {}", roomId.floor(), roomId.room(), device, on ? "ON" : "OFF");
+        setDeviceState(device, on);
     }
 
     private com.example.smarthotel.common.payload.StatePayload state(boolean on) {

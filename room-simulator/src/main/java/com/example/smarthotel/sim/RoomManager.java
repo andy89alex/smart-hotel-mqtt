@@ -50,4 +50,11 @@ public class RoomManager {
     }
 
     public List<RoomClient> rooms() { return rooms; }
+
+    /** Find a running room client by floor/room, e.g. for the guest-switch endpoint. */
+    public java.util.Optional<RoomClient> find(String floor, String room) {
+        return rooms.stream()
+                .filter(r -> r.roomId().floor().equals(floor) && r.roomId().room().equals(room))
+                .findFirst();
+    }
 }

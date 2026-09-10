@@ -98,6 +98,22 @@ Then: toggle a room's Light/AC/DND from the dashboard and watch the room react; 
 
 ---
 
+## Simulate a guest operating a switch (room-initiated change)
+
+The dashboard controls rooms by sending commands (`cmd/*`). To also demonstrate the
+*reverse* direction — a room changing its own state, as if a guest flipped a physical
+switch — the simulator exposes an endpoint. The room updates its own state and reports it
+via `state/*`, which the dashboard then reflects (no dashboard action needed):
+
+```bash
+# turn room 201's light off, initiated by the room itself
+curl -X POST http://localhost:8070/api/guest/floor2/room201/light \
+  -H 'Content-Type: application/json' -d '{"on":false}'
+```
+
+Path is `/api/guest/{floor}/{room}/{device}` with body `{"on": <bool>}`, device ∈
+`light|ac|dnd`. The simulator's web port defaults to `8070` (`SIMULATOR_PORT`).
+
 ## Project status
 
 Built with a spec-first, test-driven workflow (design → plan → task-by-task implementation

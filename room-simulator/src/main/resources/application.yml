@@ -1,6 +1,5 @@
-spring:
-  main:
-    web-application-type: none
+server:
+  port: ${SIMULATOR_PORT:8070}
 simulator:
   brokerUrl: ${BROKER_URL:tcp://localhost:1883}
   telemetryIntervalMs: 5000
